@@ -23,3 +23,8 @@ __pycache__/
 *.log
 .env
 .env.*
+
+# generated fixture audio and conversion output
+fixtures/
+*.part
+*.report.json

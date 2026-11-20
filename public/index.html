@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>master-format-lab</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header>
+  <h1>master-format-lab</h1>
+  <p class="sub">Integer/float PCM → true WAV &amp; FLAC, frozen-gain peak policy, seed-identical dither, differential playback.</p>
+</header>
+
+<main>
+  <section class="panel" id="source-panel">
+    <h2>1 · Source</h2>
+    <div id="drop" class="drop">
+      <input type="file" id="file" accept=".wav,.flac,.raw,.pcm,.s24,.f32" />
+      <p>Drop a <strong>WAV</strong> (PCM 8/16/24/32 or float 32/64) or choose a file. Raw PCM needs the format fields below.</p>
+      <div class="raw-opts">
+        <label>Raw format
+          <select id="rawFormat">
+            <option value="">(WAV header)</option>
+            <option>s16le</option><option>s16be</option>
+            <option>s24le</option><option>s24be</option>
+            <option>s32le</option><option>s32be</option>
+            <option>f32le</option><option>f32be</option>
+            <option>f64le</option><option>f64be</option>
+            <option>u8</option>
+          </select>
+        </label>
+        <label>Channels <input id="rawChannels" type="number" min="1" max="8" value="2" /></label>
+        <label>Rate <input id="rawRate" type="number" min="8000" value="48000" /></label>
+      </div>
+      <button id="genFixture" type="button" class="secondary">Use built-in hard-case fixture</button>
+      <button id="genExtremes" type="button" class="secondary">Use extremes fixture (rails / non-finite)</button>
+    </div>
+    <dl id="source-info" class="kv"></dl>
+  </section>
+
+  <section class="panel" id="target-panel">
+    <h2>2 · Target</h2>
+    <div class="grid">
+      <label>Container
+        <select id="container"><option value="wav">WAV</option><option value="flac">FLAC</option></select>
+      </label>
+      <label>Format
+        <select id="sampleFormat"><option value="pcm">Integer PCM</option><option value="float">IEEE float</option></select>
+      </label>
+      <label>Bits
+        <select id="bits"></select>
+      </label>
+      <label>Dither
+        <select id="dither"><option value="tpdf">TPDF</option><option value="rpdf">RPDF</option><option value="none">None</option></select>
+      </label>
+      <label>Seed <input id="seed" type="number" value="1584476724" /></label>
+      <label>Read chunk (frames)
+        <select id="chunk"><option>512</option><option>1024</option><option>4096</option><option selected>16384</option><option>65536</option></select>
+      </label>
+      <label>FLAC block
+        <select id="flacBlock"><option>512</option><option>1024</option><option>2048</option><option selected>4096</option><option>8192</option></select>
+      </label>
+    </div>
+  </section>
+
+  <section class="panel" id="gain-panel">
+    <h2>3 · Peak protection</h2>
+    <div class="grid">
+      <label>Mode
+        <select id="gainMode">
+          <option value="scan">Scan whole file, then one gain</option>
+          <option value="fixed">Fixed gain, record clipping</option>
+        </select>
+      </label>
+      <label id="targetDbRow">Ceiling (dBFS) <input id="targetDb" type="number" step="0.1" value="-1" /></label>
+      <label id="gainDbRow" hidden>Gain (dB) <input id="gainDb" type="number" step="0.1" value="0" /></label>
+      <label>Overflow
+        <select id="overflow"><option value="saturate">Saturate (clip + report)</option><option value="fail">Fail the run</option></select>
+      </label>
+    </div>
+    <p class="note">The gain is frozen before the first sample is written. A later peak is clipped and reported; it never changes the level already exported.</p>
+  </section>
+
+  <div class="actions">
+    <button id="run" type="button">Convert &amp; verify</button>
+    <span id="progress" class="progress"></span>
+  </div>
+
+  <section class="panel" id="result-panel" hidden>
+    <h2>4 · Result</h2>
+    <div id="report-cards" class="cards"></div>
+
+    <h3>Verification <span id="verify-badge" class="badge"></span></h3>
+    <ul id="checks" class="checks"></ul>
+
+    <h3>Listen</h3>
+    <div class="transport">
+      <label>Audition
+        <select id="listenMode">
+          <option value="target">Exported (target)</option>
+          <option value="source">Original (at same gain)</option>
+          <option value="diff">Conversion difference (target − original·gain)</option>
+          <option value="binDiff" id="binDiffOption">WAV − FLAC (container difference)</option>
+        </select>
+      </label>
+      <label>Diff boost <input id="diffBoost" type="range" min="0" max="90" value="60" /></label>
+      <span id="diffBoostLabel">+60 dB</span>
+      <button id="play" type="button">Play from playhead</button>
+      <button id="stop" type="button" class="secondary">Stop</button>
+      <label>Window <input id="playSeconds" type="number" min="0.25" max="10" step="0.25" value="3" /> s</label>
+    </div>
+    <canvas id="wave" width="1200" height="180"></canvas>
+    <div class="nav">
+      <button id="prevAnomaly" type="button" class="secondary">◀ prev anomaly</button>
+      <button id="nextAnomaly" type="button" class="secondary">next anomaly ▶</button>
+      <span id="anomaly-label"></span>
+    </div>
+
+    <h3>Chunk-size invariance</h3>
+    <p class="note">Same seed and settings, different read chunk sizes. With a frozen gain and counter-based dither the outputs must be identical.</p>
+    <button id="checkInvariance" type="button" class="secondary">Prove chunk invariance (3 sizes)</button>
+    <pre id="invariance" class="mono"></pre>
+
+    <h3>Export</h3>
+    <div class="downloads">
+      <a id="dl-target" class="btn" download>Download target</a>
+      <a id="dl-sibling" class="btn secondary" download hidden>Download other lossless container</a>
+      <a id="dl-report" class="btn secondary" download>Download report (JSON)</a>
+    </div>
+  </section>
+
+  <section class="panel" id="log-panel">
+    <h2>Log</h2>
+    <pre id="log" class="mono"></pre>
+  </section>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "name": "master-format-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Streaming PCM/float to WAV/FLAC mastering converter with deterministic dither, peak protection and differential playback",
+  "bin": {
+    "mfl": "bin/mfl.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js",
+    "fixtures": "node bin/mfl.js fixtures fixtures",
+    "mfl": "node bin/mfl.js"
+  },
+  "devDependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
