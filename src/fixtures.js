@@ -97,3 +97,137 @@ export function mulberry32(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+
+/**
+ * Stereo fidelity fixture with a fully known layout. Every feature is placed at
+ * an absolute frame the tests can point back to:
+ *
+ *   1. ramps that sweep to and from both rails (positive and negative extrema),
+ *      so the codes around the extrema can be checked sample by sample;
+ *   2. a low-level dual-channel passage that deliberately spans a block
+ *      boundary (`blockFrames`), where a lost or duplicated sample would be the
+ *      only visible defect;
+ *   3. one known clip per channel: an over-full-scale half wave whose saturated
+ *      frames are reported up front;
+ *   4. a clip-free low-amplitude triangle wave, for the no-clip control input.
+ */
+export function fidelitySignal({
+  sampleRate = SR,
+  channels = 2,
+  blockFrames = 1024,
+  rampFrames = 64,
+  lowLevelFrames = 2048,
+  clipFrames = 64,
+  triangleFrames = 256,
+  lowLevelAmp = 1 / 32768,
+} = {}) {
+  const total = rampFrames + lowLevelFrames + clipFrames + triangleFrames;
+  const data = new Float64Array(total * channels);
+  const marks = {
+    ramps: { start: 0, end: rampFrames },
+    lowLevel: { start: rampFrames, end: rampFrames + lowLevelFrames },
+    clip: { start: rampFrames + lowLevelFrames, end: rampFrames + lowLevelFrames + clipFrames },
+    triangle: { start: rampFrames + lowLevelFrames + clipFrames, end: total },
+    blockBoundary: blockFrames,
+    lowLevelCrossesBlock: rampFrames < blockFrames && rampFrames + lowLevelFrames > blockFrames,
+    clipFrames: [],
+  };
+
+  for (let i = 0; i < total; i++) {
+    let l = 0;
+    let r = 0;
+    if (i < rampFrames) {
+      // Up then down ramp covering -1..+1 on the left and the inverse on the
+      // right, so both rails and both signs are exercised in order.
+      const phase = i / (rampFrames - 1); // 0..1
+      const tri = phase < 0.5 ? phase * 2 : 2 - phase * 2; // 0..1..0
+      l = tri * 2 - 1;
+      r = 1 - tri * 2;
+    } else if (i < rampFrames + lowLevelFrames) {
+      // Quiet, slightly different per-channel levels; spans the block boundary.
+      const k = i - rampFrames;
+      l = (k % 2 ? 1 : -1) * lowLevelAmp;
+      r = (k % 2 ? -1 : 1) * lowLevelAmp * 0.5;
+    } else if (i < rampFrames + lowLevelFrames + clipFrames) {
+      // Half sine whose peaks exceed the integer full scale by 25%; the centre
+      // samples saturate and their exact frames are recorded as known clips.
+      const k = i - (rampFrames + lowLevelFrames);
+      const half = Math.sin((Math.PI * k) / (clipFrames - 1));
+      l = half * 1.25;
+      r = -half * 1.25;
+      if (l > 1 || r < -1) marks.clipFrames.push(i);
+    } else {
+      // Clip-free low-amplitude triangle: peak stays well under one LSB at
+      // 16-bit only for the lowest rows; amplitude is fixed below 0.5 so no
+      // integer output can ever reach a rail at unity gain.
+      const k = i - (rampFrames + lowLevelFrames + clipFrames);
+      const phase = (k % 32) / 32;
+      const tri = phase < 0.5 ? phase * 2 : 1 - (phase - 0.5) * 2;
+      l = (tri - 0.5) * 0.25;
+      r = (0.5 - tri) * 0.25;
+    }
+    data[i * channels] = l;
+    if (channels > 1) data[i * channels + 1] = r;
+    else data[i * channels] = (l + r) / 2;
+  }
+
+  return {
+    samples: data,
+    channels,
+    sampleRate,
+    totalFrames: total,
+    marks,
+    meta: { kind: 'fidelity-signal', blockFrames },
+  };
+}
+
+/**
+ * Negative half wave that crosses integer full scale: every negative lobe goes
+ * past -1.0 while the positive side stays inside range. Used to prove the
+ * independent saturation reader names the negative rail, its channel and the
+ * exact time range — including when the over-range samples fall inside a final
+ * partial block.
+ */
+export function overFullScaleNegative({
+  sampleRate = SR,
+  channels = 2,
+  frames = 300,
+  overshoot = 1.5,
+  partialTailFrames = 7,
+} = {}) {
+  const data = new Float64Array(frames * channels);
+  const overFrames = [];
+  for (let i = 0; i < frames; i++) {
+    const s = Math.sin((2 * Math.PI * i) / 48);
+    const neg = s < 0 ? s * overshoot : s * 0.5;
+    data[i * channels] = neg;
+    if (channels > 1) data[i * channels + 1] = neg * 0.9;
+    if (neg < -1) overFrames.push(i);
+  }
+  return {
+    samples: data,
+    channels,
+    sampleRate,
+    totalFrames: frames,
+    overFrames,
+    partialTailStart: frames - partialTailFrames,
+    meta: { kind: 'over-full-scale-negative', overshoot },
+  };
+}
+
+/**
+ * Clip-free low-amplitude triangle wave. With unity gain no sample can reach
+ * either rail at any supported integer width; a saturation report against this
+ * input would itself be a defect.
+ */
+export function lowTriangle({ sampleRate = SR, channels = 2, frames = 512, amplitude = 0.125, period = 64 } = {}) {
+  const data = new Float64Array(frames * channels);
+  for (let i = 0; i < frames; i++) {
+    const phase = (i % period) / period;
+    const tri = phase < 0.5 ? phase * 2 : 1 - (phase - 0.5) * 2;
+    const v = (tri - 0.5) * 2 * amplitude;
+    data[i * channels] = v;
+    if (channels > 1) data[i * channels + 1] = -v;
+  }
+  return { samples: data, channels, sampleRate, totalFrames: frames, amplitude, meta: { kind: 'low-triangle' } };
+}

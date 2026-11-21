@@ -124,6 +124,8 @@ function* conversionCore(opts) {
     flacBlockSize = 4096,
     analysisBlockFrames = 262144,
     onProgress = null,
+    pauseAt = null,
+    onPause = null,
   } = opts;
 
   const channels = source.channels;
@@ -245,6 +247,10 @@ function* conversionCore(opts) {
   }
 
   const writeChunk = (codes, startFrame, frames) => {
+    // Expose the assembler's absolute frame range to a segmented sink before
+    // the bytes move; a failed write therefore cannot be committed to its
+    // index. Plain sinks ignore the extra property.
+    if (sink.pendingRange !== undefined) sink.pendingRange = { startFrame, frames };
     if (isFloatOut) {
       const out = new Float64Array(codes.length);
       for (let i = 0; i < out.length; i++) out[i] = codes[i] * gain;
@@ -266,6 +272,11 @@ function* conversionCore(opts) {
   let carry = null; // no carry needed; reads align on frame boundaries
   while (processed < totalFrames) {
     const frames = Math.min(readFrames, totalFrames - processed);
+    if (pauseAt && pauseAt(processed, frames)) {
+      // Explicit pause between write segments. The generator retains all
+      // state; resuming simply continues the same loop with no re-read.
+      if (onPause) onPause({ start: processed, frames, outputFrames });
+    }
     const block = yield { start: processed, frames };
     if (isFloatOut) {
       const codes = new Float64Array(block.length);
